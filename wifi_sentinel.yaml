@@ -1,0 +1,143 @@
+esphome:
+  name: "wifi-sentinel"
+  friendly_name: "wifi-sentinel"
+  on_boot:
+    priority: 600
+    then:
+      - switch.turn_on: relay
+esp8266:
+  board: esp01_1m
+
+logger:
+  level: INFO
+api:
+ota:
+  - platform: esphome
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none
+#  manual_ip:
+#    static_ip: 192.168.0.71
+#    gateway: 192.168.0.1
+#    subnet: 255.255.255.0
+  ap:
+    ssid: "WiFi Sentinel Hotspot"
+    password: "Sentinel"
+  fast_connect: true
+  on_connect:
+    - script.execute: interval_script
+    
+captive_portal:
+
+web_server:
+  port: 80
+  ota: false
+
+globals:
+  - id: verification_count
+    type: int
+    restore_value: false  
+    initial_value: '0'  
+  - id: restarts_count
+    type: int
+    restore_value: false  
+    initial_value: '0'  
+
+switch:
+  - platform: gpio
+    id: relay
+    pin:
+      number: GPIO0
+    name: WiFi Relay
+    restore_mode: ALWAYS_OFF
+
+sensor:
+  - platform: wifi_signal
+    name: WiFi Semnal
+    update_interval: 60s
+
+  - platform: uptime
+    id: uptime_s
+    update_interval: 60s
+
+  - platform: template
+    name: "Checks performed"
+    lambda: |-
+      return id(verification_count);
+    update_interval: 60s  
+    accuracy_decimals: 0
+
+  - platform: template
+    name: "Restarts performed"
+    lambda: |-
+      return id(restarts_count);
+    update_interval: 60s  
+    accuracy_decimals: 0
+
+script:
+  - id: interval_script
+    mode: restart
+    then:
+      - lambda: |-
+          id(verification_count) += 1; 
+      - if:
+          condition:
+            and:
+              - not:
+                  wifi.connected
+          then:
+            - switch.turn_off: relay
+            - lambda: |-
+                id(restarts_count) += 1; 
+            - delay: 5s
+            - switch.turn_off: relay
+      - logger.log:
+            format: "WiFi connection checked!"
+            level: INFO 
+      - delay: !lambda 'return id(interval_timer).state * 1000;'  
+      - script.execute: interval_script  
+
+
+binary_sensor:
+  - platform: status
+    name: "Status"
+    id: wifi_status
+    
+number:
+  - platform: template
+    name: "Check interval"
+    id: interval_timer
+    optimistic: true
+    min_value: 180
+    max_value: 600
+    step: 10
+    unit_of_measurement: "s"
+    initial_value: 300
+    icon: "mdi:timer"
+
+
+
+
+text_sensor:
+  - platform: template
+    name: "Uptime"
+    lambda: |-
+      int seconds = (id(uptime_s).state);
+      int days = seconds / (24 * 3600);
+      seconds = seconds % (24 * 3600); 
+      int hours = seconds / 3600;
+      seconds = seconds % 3600;
+      int minutes = seconds /  60;
+      seconds = seconds % 60;
+      if ( days ) {
+      return { (String(days) +"d " + String(hours) +"h " + String(minutes) +"m").c_str() };
+      } else if ( hours ) {
+      return { (String(hours) +"h " + String(minutes) +"m").c_str() };
+      } else if ( minutes ) {
+      return { (String(minutes) +"m").c_str() };
+      } else {
+      return { (String(seconds) +"s").c_str() };
+      }
+    icon: mdi:clock-start
+    update_interval: 15s    
